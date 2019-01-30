@@ -10,6 +10,8 @@ This module performs the following:
 
 # These are needed for the extractors
 import datetime
+import logging
+
 from django.utils.timezone import utc
 
 from certificates.models import GeneratedCertificate
@@ -25,6 +27,9 @@ from figures.pipeline.logger import log_error
 import figures.pipeline.loaders
 from figures.serializers import CourseIndexSerializer
 import figures.sites
+
+
+logger = logging.getLogger(__name__)
 
 # TODO: Move extractors to figures.pipeline.extract module
 
@@ -298,18 +303,24 @@ class CourseDailyMetricsLoader(object):
             except CourseDailyMetrics.DoesNotExist:
                 # proceed normally
                 pass
-
         data = self.get_data(date_for=date_for)
-        cdm, created = CourseDailyMetrics.objects.update_or_create(
-            course_id=self.course_id,
-            site=figures.sites.get_site_for_course(self.course_id),
-            date_for=date_for,
-            defaults=dict(
-                enrollment_count=data['enrollment_count'],
-                active_learners_today=data['active_learners_today'],
-                average_progress=data['average_progress'],
-                average_days_to_complete=data['average_days_to_complete'],
-                num_learners_completed=data['num_learners_completed'],
+        try:
+            cdm, created = CourseDailyMetrics.objects.update_or_create(
+                course_id=self.course_id,
+                site=figures.sites.get_site_for_course(self.course_id),
+                date_for=date_for,
+                defaults=dict(
+                    enrollment_count=data['enrollment_count'],
+                    active_learners_today=data['active_learners_today'],
+                    average_progress=data['average_progress'],
+                    average_days_to_complete=data['average_days_to_complete'],
+                    num_learners_completed=data['num_learners_completed'],
+                )
             )
-        )
-        return (cdm, created,)
+            return (cdm, created,)
+        except Exception as e:
+            msg = 'Exception raised in CourseDailyMetrics.load: {}'
+            msg = ' course id: "{}" and date_for: "{}".'
+            msg += 'data={}'
+            logger.error(msg.format(e, str(self.course_id), date_for, data))
+            raise e

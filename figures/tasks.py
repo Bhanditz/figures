@@ -46,6 +46,8 @@ def populate_single_cdm(course_id, date_for=None, force_update=False):
     logger.info(msg)
 
     start_time = time.time()
+
+    # TODO: We
     cdm_obj, created = CourseDailyMetricsLoader(
         course_id).load(date_for=date_for, force_update=force_update)
     elapsed_time = time.time() - start_time
@@ -93,14 +95,17 @@ def populate_daily_metrics(date_for=None, force_update=False):
     logger.info('Starting task "figures.populate_daily_metrics" for date "{}"'.format(
         date_for))
 
-    # print('testing...')
-    # import pdb; pdb.set_trace()
     for site in Site.objects.all():
         for course in figures.sites.get_courses_for_site(site):
-            populate_single_cdm(
-                course_id=course.id,
-                date_for=date_for,
-                force_update=force_update)
+            try:
+                populate_single_cdm(
+                    course_id=course.id,
+                    date_for=date_for,
+                    force_update=force_update)
+            except Exception as e:
+                msg = 'Populating CDM for course "{}" and date "{}" failed'
+                logger.error(msg.format(str(course.id), date_for))
+                # TODO: Capture this CDM load value to the Figures pipeline error table
         populate_site_daily_metrics(
             site_id=site.id,
             date_for=date_for,
