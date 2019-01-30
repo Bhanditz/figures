@@ -319,8 +319,10 @@ class CourseDailyMetricsLoader(object):
             )
             return (cdm, created,)
         except Exception as e:
-            msg = 'Exception raised in CourseDailyMetrics.load: {}'
-            msg = ' course id: "{}" and date_for: "{}".'
-            msg += 'data={}'
-            logger.error(msg.format(e, str(self.course_id), date_for, data))
+            # We have this exception to capture data not exp
+            msg = 'Figures pipeline failed to load course data.'
+            msg = ' course id="{}". date_for="{}"'.format(self.course_id, date_for)
+            msg += 'data={}'.format(data)
+            msg += 'Exception raised in CourseDailyMetrics.load: {}'.format(e)
+            logger.error(msg)
             raise e
