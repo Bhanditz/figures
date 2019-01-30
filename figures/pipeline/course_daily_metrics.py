@@ -313,7 +313,7 @@ class CourseDailyMetricsLoader(object):
                     enrollment_count=data['enrollment_count'],
                     active_learners_today=data['active_learners_today'],
                     average_progress=data['average_progress'],
-                    average_days_to_complete=data['average_days_to_complete'],
+                    average_days_to_complete=int(round(data['average_days_to_complete'])),
                     num_learners_completed=data['num_learners_completed'],
                 )
             )
