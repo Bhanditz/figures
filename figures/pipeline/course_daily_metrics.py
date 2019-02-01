@@ -12,6 +12,8 @@ This module performs the following:
 import datetime
 import logging
 
+from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.utils.timezone import utc
 
 from certificates.models import GeneratedCertificate
@@ -35,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 # The extractors work locally on the LMS
 # Future: add a remote mode to pull data via REST API
+
+class InvalideCourseAverageProgress(Exception):
+    pass
 
 #
 # Extraction helper methods
@@ -271,11 +276,36 @@ class CourseDailyMetricsLoader(object):
         self.course_id = course_id
         # TODO: Consider adding extractor as optional param
         self.extractor = CourseDailyMetricsExtractor()
+        self.site = figures.sites.get_site_for_course(self.course_id)
 
     def get_data(self, date_for):
         return self.extractor.extract(
             course_id=self.course_id,
             date_for=date_for)
+
+    @transaction.atomic
+    def save_metrics(self, date_for, data):
+        """
+        convenience method to handle saving and validating in a transaction
+
+        Raises django.core.exceptions.ValidationError if the record fails
+        validation
+        """
+
+        cdm, created = CourseDailyMetrics.objects.update_or_create(
+            course_id=self.course_id,
+            site=self.site,
+            date_for=date_for,
+            defaults=dict(
+                enrollment_count=data['enrollment_count'],
+                active_learners_today=data['active_learners_today'],
+                average_progress=data['average_progress'],
+                average_days_to_complete=int(round(data['average_days_to_complete'])),
+                num_learners_completed=data['num_learners_completed'],
+            )
+        )
+        cdm.clean_fields()
+        return (cdm, created,)
 
     def load(self, date_for=None, force_update=False, **kwargs):
         """
@@ -285,44 +315,26 @@ class CourseDailyMetricsLoader(object):
         provided in the data. So before hacking something together, I want to
         think this over some more.
 
+        If the record alrdady exists and force_update is False, then simply
+        return the record with the 'created' flag to False. This saves us an
+        unnecessary call to extract data
+
+        Raises ValidationError if invalid data is attempted to be saved to the
+        course daily metrics model instance
         """
         if not date_for:
             date_for = prev_day(
-                datetime.datetime.utcnow().replace(tzinfo=utc).date()
-            )
+                datetime.datetime.utcnow().replace(tzinfo=utc).date())
 
-        # if we already have a record for the date_for and force_update is False
-        # then skip getting data
-        if not force_update:
-            try:
-                cdm = CourseDailyMetrics.objects.get(
-                    course_id=self.course_id,
-                    date_for=date_for)
-                return (cdm, False,)
-
-            except CourseDailyMetrics.DoesNotExist:
-                # proceed normally
-                pass
-        data = self.get_data(date_for=date_for)
         try:
-            cdm, created = CourseDailyMetrics.objects.update_or_create(
-                course_id=self.course_id,
-                site=figures.sites.get_site_for_course(self.course_id),
-                date_for=date_for,
-                defaults=dict(
-                    enrollment_count=data['enrollment_count'],
-                    active_learners_today=data['active_learners_today'],
-                    average_progress=data['average_progress'],
-                    average_days_to_complete=int(round(data['average_days_to_complete'])),
-                    num_learners_completed=data['num_learners_completed'],
-                )
-            )
-            return (cdm, created,)
-        except Exception as e:
-            # We have this exception to capture data not exp
-            msg = 'Figures pipeline failed to load course data.'
-            msg = ' course id="{}". date_for="{}"'.format(self.course_id, date_for)
-            msg += 'data={}'.format(data)
-            msg += 'Exception raised in CourseDailyMetrics.load: {}'.format(e)
-            logger.error(msg)
-            raise e
+            cdm = CourseDailyMetrics.objects.get(course_id=self.course_id,
+                                                 date_for=date_for)
+            # record found, only update if force update flag is True
+            if not force_update:
+                return (cdm, False,)
+        except CourseDailyMetrics.DoesNotExist:
+            # record not found, move on to creating
+            pass
+
+        data = self.get_data(date_for=date_for)
+        return self.save_metrics(date_for=date_for, data=data)

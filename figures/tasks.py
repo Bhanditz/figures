@@ -19,6 +19,7 @@ from figures.helpers import as_course_key, as_date
 from figures.pipeline.course_daily_metrics import CourseDailyMetricsLoader
 from figures.pipeline.site_daily_metrics import SiteDailyMetricsLoader
 import figures.sites
+from figures.pipeline.logger import log_error_to_db
 
 logger = get_task_logger(__name__)
 
@@ -59,13 +60,15 @@ def populate_single_cdm(course_id, date_for=None, force_update=False):
 def populate_site_daily_metrics(site_id, **kwargs):
     '''Populate a SiteDailyMetrics record
     '''
-    logger.debug("populate_site_daily_metrics called")
+    logger.debug(
+        'populate_site_daily_metrics called for site_id={}'.format(site_id))
     SiteDailyMetricsLoader().load(
         site=Site.objects.get(id=site_id),
         date_for=kwargs.get('date_for', None),
         force_update=kwargs.get('force_update', False),
         )
-    logger.debug('done running populate_site_daily_metrics')
+    logger.debug(
+        'done running populate_site_daily_metrics for site_id={}"'.format(site_id))
 
 
 @shared_task
@@ -103,9 +106,23 @@ def populate_daily_metrics(date_for=None, force_update=False):
                     date_for=date_for,
                     force_update=force_update)
             except Exception as e:
-                msg = 'Populating CDM for course "{}" and date "{}" failed'
-                logger.error(msg.format(str(course.id), date_for))
-                # TODO: Capture this CDM load value to the Figures pipeline error table
+                # Always capture CDM load exceptions to the Figures pipeline
+                # error table
+                error_data = dict(
+                    date_for=date_for,
+                    msg='figures.tasks.populate_daily_metrics failed',
+                    exception_class=e.__class__.__name__,
+                    )
+                if hasatttr(e,'message_dict'):
+                    error_data['message_dict'] = e.message_dict
+                log_error(
+                    error_data=error_data,
+                    error_type=PipelineError.COURSE_DATA,
+                    course_id=str(course.id),
+                    site=site,
+                    logger=logger,
+                    log_pipeline_errors_to_db=True,
+                    )
         populate_site_daily_metrics(
             site_id=site.id,
             date_for=date_for,
